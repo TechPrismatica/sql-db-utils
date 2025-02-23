@@ -1,0 +1,9 @@
+name: sql-db-utils-dev
+services:
+  sql-db-utils:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      - ..:/sql-db-utils
+      - ../data:/data

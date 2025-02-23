@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "sql_db_utils/__version__.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["/sql_db_utils"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[project]
+name = "sql-db-utils"
+dynamic = ["version"]
+description = "SQL database utilities package for developers"
+readme = "README.md"
+requires-python = ">=3.13"
+authors = [
+    { name = "Faizan" },
+    { email = "faizanazim11@gmail.com" },
+]
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Plugins",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+
+dependencies = [
+    "sqlalchemy>=2.0.38",
+    "sqlalchemy-utils>=0.41.2",
+    "python-dateutil>=2.9.0.post0",
+    "psycopg>=3.2.5",
+    "whenever>=0.7.0",
+]
+
+[project.optional-dependencies]
+polars = ["polars>=1.23.0", "pyarrow>=19.0.1"]
+
+pandas = ["pandas>=2.2.3", "pyarrow>=19.0.1"]
+
+async = ["psycopg[pool]>=3.2.5", "sqlalchemy[asyncio]>=2.0.38"]
+
+binary = ["psycopg[binary]>=3.2.5"]
+
+codegen = ["sqlacodegen==3.0.0rc5"]
+
+
+[tool.ruff]
+lint.select = [
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "F", # pyflakes
+    "I", # isort
+    "C", # flake8-comprehensions
+    "B", # flake8-bugbear
+]
+lint.ignore = [
+    # "E501", # line too long, handled by black
+    "B008", # do not perform function calls in argument defaults
+    "C901", # too complex
+    "E402",
+    "B904",
+    "B905",
+    "B009",
+    "C417",
+
+]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true
