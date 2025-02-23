@@ -22,7 +22,7 @@ jobs:
         - name: Build the package
           run: python -m build
         - name: Upload package to artifact
-          uses: actions/upload-artifact@v
+          uses: actions/upload-artifact@v4
           with:
             name: python-package-distributions
             path: dist/
