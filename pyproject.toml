@@ -41,13 +41,9 @@ dependencies = [
 
 [project.optional-dependencies]
 polars = ["polars>=1.23.0", "pyarrow>=19.0.1"]
-
 pandas = ["pandas>=2.2.3", "pyarrow>=19.0.1"]
-
 async = ["psycopg[pool]>=3.2.5", "sqlalchemy[asyncio]>=2.0.38"]
-
 binary = ["psycopg[binary]>=3.2.5"]
-
 codegen = ["sqlacodegen==3.0.0rc5"]
 
 

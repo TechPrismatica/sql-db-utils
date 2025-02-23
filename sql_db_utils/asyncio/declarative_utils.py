@@ -81,7 +81,7 @@ class DeclarativeUtils:
             return False
         return f"{self.project_id}.async_{self.raw_database}_{self.schema}"
 
-    async def _get_declarative_module(self): # NOSONAR
+    async def _get_declarative_module(self):  # NOSONAR
         if declarative_module_path := await self._prepare_declarative_file():
             try:
                 self.declarative_module = declarative_module_path

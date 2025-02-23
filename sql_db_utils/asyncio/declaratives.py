@@ -32,7 +32,7 @@ class BaseClasses:
             disable_timestamp: bool = False,
         ) -> DeclarativeBase:
             global base_classes
-            if not (Base := base_classes.get(f"{raw_database}_{schema}")): # NOSONAR
+            if not (Base := base_classes.get(f"{raw_database}_{schema}")):  # NOSONAR
 
                 class Base(AsyncAttrs, DeclarativeBase):
                     """

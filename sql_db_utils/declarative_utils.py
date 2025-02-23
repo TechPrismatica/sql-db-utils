@@ -71,7 +71,7 @@ class DeclarativeUtils:
             return False
         return f"{self.project_id}.{self.raw_database}_{self.schema}"
 
-    def _get_declarative_module(self): # NOSONAR
+    def _get_declarative_module(self):  # NOSONAR
         if declarative_module_path := self._prepare_declarative_file():
             try:
                 declarative_module = importlib.import_module(declarative_module_path)
