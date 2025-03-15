@@ -57,9 +57,7 @@ class DeclarativeUtils:
             logging.debug(f"Attempting to create declarative file: {declarative_file}")
             from sql_db_utils.asyncio.codegen import UTDeclarativeGenerator
 
-            session = await self.session_manager.get_session(
-                self.raw_database, None if self.raw_db else self.tenant_id
-            )
+            session = await self.session_manager.get_session(self.raw_database, None if self.raw_db else self.tenant_id)
             meta = MetaData()
             async with session.bind.begin() as conn:
                 await conn.run_sync(meta.reflect, schema=self.schema)

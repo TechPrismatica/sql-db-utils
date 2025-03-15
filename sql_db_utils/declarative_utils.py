@@ -83,9 +83,29 @@ class DeclarativeUtils:
                         logging.debug("Module import failed due to module creation, exiting module for force restart")
                         try:
                             import asyncio
+                            import concurrent.futures
+                            import time
 
-                            loop = asyncio.get_event_loop()
-                            loop.stop()
+                            loop = asyncio.get_running_loop()
+                            tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+
+                            for task in tasks:
+                                task.cancel()
+
+                            # Use run_coroutine_threadsafe since we're in a sync function
+                            future = asyncio.run_coroutine_threadsafe(
+                                asyncio.gather(*tasks, return_exceptions=True), loop
+                            )
+
+                            # Wait for tasks to be cancelled (with timeout)
+                            try:
+                                future.result(timeout=5)
+                            except concurrent.futures.TimeoutError:
+                                logging.warning("Timeout while waiting for tasks to cancel")
+
+                            # Give the loop a moment to process the cancellations
+                            time.sleep(0.1)
+                            loop.call_soon_threadsafe(loop.stop)
                         except ImportError:
                             logging.error("Not asyncio module, stopping using sys.exit")
                             sys.exit(1)
@@ -151,9 +171,7 @@ class _DeclarativeUtilsFactory:
         declarative_utils = {}
         sys.path.append(str(PathConfig.DECLARATIVES_PATH))
 
-    def get_declarative_utils_factory(
-        self, raw_database: str, session_manager: SQLSessionManager
-    ):
+    def get_declarative_utils_factory(self, raw_database: str, session_manager: SQLSessionManager):
         async def get_declarative_utils(
             tenant_id: Annotated[str, Cookie], schema: Annotated[str, Query] = PostgresConfig.PG_DEFAULT_SCHEMA
         ):

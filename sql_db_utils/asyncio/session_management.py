@@ -108,9 +108,7 @@ class SQLSessionManager:
     ) -> AsyncEngine:
         return await self._get_engine(database=database, tenant_id=tenant_id, metadata=metadata)
 
-    def get_db_factory(
-        self, database: str, retrying: bool = False
-    ) -> AsyncGenerator[AsyncSession, Any]:
+    def get_db_factory(self, database: str, retrying: bool = False) -> AsyncGenerator[AsyncSession, Any]:
         from fastapi import Cookie
 
         async def get_db(tenant_id: Annotated[str, Cookie]):
