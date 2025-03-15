@@ -97,7 +97,11 @@ class DeclarativeUtils:
                         try:
                             import asyncio
 
-                            loop = asyncio.get_event_loop()
+                            loop = asyncio.get_running_loop()
+                            tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+                            for task in tasks:
+                                task.cancel()
+                            await asyncio.gather(*tasks, return_exceptions=True)
                             loop.stop()
                         except ImportError:
                             logging.error("Not asyncio module, stopping using sys.exit")
