@@ -1,7 +1,6 @@
 import logging
-from typing import Any, AsyncGenerator, Union
+from typing import Annotated, Any, AsyncGenerator, Union
 
-from redis import Redis
 from sqlalchemy import Engine, MetaData, NullPool, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -14,19 +13,18 @@ from sql_db_utils.config import ModuleConfig, PostgresConfig
 
 
 class SQLSessionManager:
-    def __init__(self, redis_project_db: Union[Redis, None] = None, database_uri: Union[str, None] = None) -> None:
+    __slots__ = ("_db_engines", "database_uri")
+
+    def __init__(self, database_uri: Union[str, None] = None) -> None:
         self._db_engines = {}
-        if not redis_project_db:
-            from sql_db_utils.redis_connections import project_db as redis_project_db
-        self.redis_project_source_db = redis_project_db
         self.database_uri = database_uri or PostgresConfig.POSTGRES_URI
 
     def __del__(self) -> None:
         for engine in self._db_engines.values():
             engine.dispose()
 
-    def _get_fully_qualified_db(self, database: str, project_id: Union[str, None] = None) -> str:
-        return f"{project_id}__{database}" if project_id else database
+    def _get_fully_qualified_db(self, database: str, tenant_id: Union[str, None] = None) -> str:
+        return f"{tenant_id}__{database}" if tenant_id else database
 
     async def _ensure_engine_connection(self, _engine_obj: Engine):
         for _ in range(PostgresConfig.PG_MAX_RETRY):
@@ -43,9 +41,9 @@ class SQLSessionManager:
                 logging.error("Server connection failed")
 
     async def _get_engine(
-        self, database: str, project_id: Union[str, None] = None, metadata: Union[MetaData, None] = None
+        self, database: str, tenant_id: Union[str, None] = None, metadata: Union[MetaData, None] = None
     ) -> AsyncSession:
-        qualified_db_name = self._get_fully_qualified_db(database=database, project_id=project_id)
+        qualified_db_name = self._get_fully_qualified_db(database=database, tenant_id=tenant_id)
         if not (engine := self._db_engines.get(qualified_db_name)):
             logging.debug(f"Creating engine for database: {qualified_db_name}")
             if PostgresConfig.PG_ENABLE_POOLING:
@@ -89,47 +87,33 @@ class SQLSessionManager:
     async def get_session(
         self,
         database: str,
-        project_id: Union[str, None] = None,
+        tenant_id: Union[str, None] = None,
         metadata: Union[MetaData, None] = None,
         retrying: bool = False,
     ) -> AsyncSession:
         if PostgresConfig.PG_RETRY_QUERY or retrying:
             return AsyncSession(
-                bind=self._get_engine(database=database, project_id=project_id, metadata=metadata),
+                bind=self._get_engine(database=database, tenant_id=tenant_id, metadata=metadata),
                 future=True,
                 query_cls=RetryingQuery,
             )
         return AsyncSession(
-            bind=await self._get_engine(database=database, project_id=project_id, metadata=metadata),
+            bind=await self._get_engine(database=database, tenant_id=tenant_id, metadata=metadata),
             expire_on_commit=False,
             future=True,
         )
 
     async def get_engine_obj(
-        self, database: str, project_id: Union[str, None] = None, metadata: Union[MetaData, None] = None
+        self, database: str, tenant_id: Union[str, None] = None, metadata: Union[MetaData, None] = None
     ) -> AsyncEngine:
-        return await self._get_engine(database=database, project_id=project_id, metadata=metadata)
+        return await self._get_engine(database=database, tenant_id=tenant_id, metadata=metadata)
 
     def get_db_factory(
-        self, database: str, security_enabled: bool = True, retrying: bool = False
+        self, database: str, retrying: bool = False
     ) -> AsyncGenerator[AsyncSession, Any]:
-        if security_enabled:
-            try:
-                from ut_security_util import MetaInfoSchema
+        from fastapi import Cookie
 
-                async def get_db(meta: MetaInfoSchema):
-                    yield await self.get_session(database=database, project_id=meta.project_id, retrying=retrying)
+        async def get_db(tenant_id: Annotated[str, Cookie]):
+            yield await self.get_session(database=database, tenant_id=tenant_id, retrying=retrying)
 
-                return get_db
-            except ImportError:
-                logging.error("ut_security_util not installed, please install it to use security features")
-                raise
-        else:
-            from fastapi import Request
-
-            async def get_db(request: Request):
-                cookies = request.cookies
-                project_id = cookies.get("project_id")
-                yield await self.get_session(database=database, project_id=project_id, retrying=retrying)
-
-            return get_db
+        return get_db
