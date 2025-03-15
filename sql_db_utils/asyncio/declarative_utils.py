@@ -95,12 +95,20 @@ class DeclarativeUtils:
                         try:
                             import asyncio
 
+                            logging.warning("Emergency shutdown required - gracefully canceling tasks")
                             loop = asyncio.get_running_loop()
                             tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+                            logging.debug(f"Canceling {len(tasks)} pending tasks")
+
                             for task in tasks:
                                 task.cancel()
-                            await asyncio.gather(*tasks, return_exceptions=True)
-                            loop.stop()
+
+                            # Wait for all tasks to complete with cancellation
+                            if tasks:
+                                await asyncio.gather(*tasks, return_exceptions=True)
+
+                            logging.info("Tasks gracefully canceled, exiting")
+                            sys.exit(1)
                         except ImportError:
                             logging.error("Not asyncio module, stopping using sys.exit")
                             sys.exit(1)
