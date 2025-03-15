@@ -21,10 +21,10 @@ class DeclarativeUtils:
     """
 
     def __init__(
-        self, raw_database: str, project_id: str, session_manager: SQLSessionManager, schema: str, raw_db: bool = False
+        self, raw_database: str, tenant_id: str, session_manager: SQLSessionManager, schema: str, raw_db: bool = False
     ) -> None:
         self.raw_database: str = raw_database
-        self.project_id: str = project_id
+        self.tenant_id: str = tenant_id
         self.session_manager: SQLSessionManager = session_manager
         self.declarative_module = None
         self.raw_db = raw_db
@@ -36,26 +36,26 @@ class DeclarativeUtils:
             self._get_declarative_module()
 
     def _prepare_declarative_file(self, refresh: bool = False):
-        declarative_project_directory = PathConfig.DECLARATIVES_PATH / self.project_id
-        if not declarative_project_directory.exists():
-            declarative_project_directory.mkdir(parents=True)
-        project_init_file = declarative_project_directory / "__init__.py"
-        if not project_init_file.exists():
-            with open(project_init_file, "w") as f:
+        declarative_tenant_directory = PathConfig.DECLARATIVES_PATH / self.tenant_id
+        if not declarative_tenant_directory.exists():
+            declarative_tenant_directory.mkdir(parents=True)
+        tenant_init_file = declarative_tenant_directory / "__init__.py"
+        if not tenant_init_file.exists():
+            with open(tenant_init_file, "w") as f:
                 f.write("")
-        declarative_file = declarative_project_directory / f"{self.raw_database}_{self.schema}.py"
+        declarative_file = declarative_tenant_directory / f"{self.raw_database}_{self.schema}.py"
         if declarative_file.exists() and ModuleConfig.DEFER_GEN_REFRESH and not refresh:
-            return f"{self.project_id}.{self.raw_database}_{self.schema}"
+            return f"{self.tenant_id}.{self.raw_database}_{self.schema}"
         try:
             logging.debug(f"Attempting to create declarative file: {declarative_file}")
             from sql_db_utils.codegen import UTDeclarativeGenerator
 
-            session = self.session_manager.get_session(self.raw_database, None if self.raw_db else self.project_id)
+            session = self.session_manager.get_session(self.raw_database, None if self.raw_db else self.tenant_id)
             meta = MetaData()
             meta.reflect(bind=session.bind, schema=self.schema)
             with open(declarative_file, "w", encoding="utf-8") as f:
                 generator = UTDeclarativeGenerator(
-                    raw_database=self.raw_database if self.raw_db else f"{self.project_id}__{self.raw_database}",
+                    raw_database=self.raw_database if self.raw_db else f"{self.tenant_id}__{self.raw_database}",
                     metadata=meta,
                     bind=session.bind,
                     options=set(),
@@ -69,7 +69,7 @@ class DeclarativeUtils:
         except Exception as e:
             logging.error(f"Error creating declarative file: {e}")
             return False
-        return f"{self.project_id}.{self.raw_database}_{self.schema}"
+        return f"{self.tenant_id}.{self.raw_database}_{self.schema}"
 
     def _get_declarative_module(self):  # NOSONAR
         if declarative_module_path := self._prepare_declarative_file():
@@ -83,9 +83,29 @@ class DeclarativeUtils:
                         logging.debug("Module import failed due to module creation, exiting module for force restart")
                         try:
                             import asyncio
+                            import concurrent.futures
+                            import time
 
-                            loop = asyncio.get_event_loop()
-                            loop.stop()
+                            loop = asyncio.get_running_loop()
+                            tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+
+                            for task in tasks:
+                                task.cancel()
+
+                            # Use run_coroutine_threadsafe since we're in a sync function
+                            future = asyncio.run_coroutine_threadsafe(
+                                asyncio.gather(*tasks, return_exceptions=True), loop
+                            )
+
+                            # Wait for tasks to be cancelled (with timeout)
+                            try:
+                                future.result(timeout=5)
+                            except concurrent.futures.TimeoutError:
+                                logging.warning("Timeout while waiting for tasks to cancel")
+
+                            # Give the loop a moment to process the cancellations
+                            time.sleep(0.1)
+                            loop.call_soon_threadsafe(loop.stop)
                         except ImportError:
                             logging.error("Not asyncio module, stopping using sys.exit")
                             sys.exit(1)
@@ -151,104 +171,56 @@ class _DeclarativeUtilsFactory:
         declarative_utils = {}
         sys.path.append(str(PathConfig.DECLARATIVES_PATH))
 
-    def get_declarative_utils_factory(
-        self, raw_database: str, session_manager: SQLSessionManager, security_enabled: bool = True
-    ):
-        if security_enabled:
-            try:
-                from ut_security_util import MetaInfoSchema
+    def get_declarative_utils_factory(self, raw_database: str, session_manager: SQLSessionManager):
+        async def get_declarative_utils(
+            tenant_id: Annotated[str, Cookie], schema: Annotated[str, Query] = PostgresConfig.PG_DEFAULT_SCHEMA
+        ):
+            global declarative_utils
+            if declarative_util := declarative_utils.get(f"{raw_database}_{tenant_id}_{schema}"):
+                declarative_util._pre_check()
+                return declarative_util
+            else:
+                declarative_util = DeclarativeUtils(raw_database, tenant_id, session_manager, schema)
+                declarative_utils[f"{raw_database}_{tenant_id}_{schema}"] = declarative_util
+                return declarative_util
 
-                def get_declarative_utils(
-                    meta: MetaInfoSchema,
-                    schema: Annotated[str, Query] = PostgresConfig.PG_DEFAULT_SCHEMA,
-                ) -> DeclarativeUtils:
-                    global declarative_utils
-                    if declarative_util := declarative_utils.get(f"{raw_database}_{meta.project_id}_{schema}"):
-                        declarative_util._pre_check()
-                        return declarative_util
-                    else:
-                        declarative_util = DeclarativeUtils(raw_database, meta.project_id, session_manager, schema)
-                        declarative_utils[f"{raw_database}_{meta.project_id}_{schema}"] = declarative_util
-                        return declarative_util
-
-                return get_declarative_utils
-            except ImportError:
-                logging.error("ut_security_util not installed, please install it to use security features")
-                raise
-        else:
-
-            async def get_declarative_utils(
-                project_id: Annotated[str, Cookie], schema: Annotated[str, Query] = PostgresConfig.PG_DEFAULT_SCHEMA
-            ):
-                global declarative_utils
-                if declarative_util := declarative_utils.get(f"{raw_database}_{project_id}_{schema}"):
-                    declarative_util._pre_check()
-                    return declarative_util
-                else:
-                    declarative_util = DeclarativeUtils(raw_database, project_id, session_manager, schema)
-                    declarative_utils[f"{raw_database}_{project_id}_{schema}"] = declarative_util
-                    return declarative_util
-
-            return get_declarative_utils
+        return get_declarative_utils
 
     def get_schema_mandated_declarative_utils_factory(
         self,
         raw_database: str,
         session_manager: SQLSessionManager,
         schema: str,
-        security_enabled: bool = True,
     ):
-        if security_enabled:
-            try:
-                from ut_security_util import MetaInfoSchema
+        async def get_declarative_utils(
+            tenant_id: Annotated[str, Cookie],
+        ):
+            global declarative_utils
+            if declarative_util := declarative_utils.get(f"{raw_database}_{tenant_id}_{schema}"):
+                declarative_util._pre_check()
+                return declarative_util
+            else:
+                declarative_util = DeclarativeUtils(raw_database, tenant_id, session_manager, schema)
+                declarative_utils[f"{raw_database}_{tenant_id}_{schema}"] = declarative_util
+                return declarative_util
 
-                def get_declarative_utils(
-                    meta: MetaInfoSchema,
-                ) -> DeclarativeUtils:
-                    global declarative_utils
-                    if declarative_util := declarative_utils.get(f"{raw_database}_{meta.project_id}_{schema}"):
-                        declarative_util._pre_check()
-                        return declarative_util
-                    else:
-                        declarative_util = DeclarativeUtils(raw_database, meta.project_id, session_manager, schema)
-                        declarative_utils[f"{raw_database}_{meta.project_id}_{schema}"] = declarative_util
-                        return declarative_util
-
-                return get_declarative_utils
-            except ImportError:
-                logging.error("ut_security_util not installed, please install it to use security features")
-                raise
-        else:
-
-            async def get_declarative_utils(
-                project_id: Annotated[str, Cookie],
-            ):
-                global declarative_utils
-                if declarative_util := declarative_utils.get(f"{raw_database}_{project_id}_{schema}"):
-                    declarative_util._pre_check()
-                    return declarative_util
-                else:
-                    declarative_util = DeclarativeUtils(raw_database, project_id, session_manager, schema)
-                    declarative_utils[f"{raw_database}_{project_id}_{schema}"] = declarative_util
-                    return declarative_util
-
-            return get_declarative_utils
+        return get_declarative_utils
 
     def get_declarative_utils(
         self,
         raw_database: str,
         session_manager: SQLSessionManager,
-        project_id: str,
+        tenant_id: str,
         schema: str = PostgresConfig.PG_DEFAULT_SCHEMA,
         raw_db: bool = False,
     ) -> DeclarativeUtils:
         global declarative_utils
-        if declarative_util := declarative_utils.get(f"{raw_database}_{project_id}_{schema}"):
+        if declarative_util := declarative_utils.get(f"{raw_database}_{tenant_id}_{schema}"):
             declarative_util._pre_check()
             return declarative_util
         else:
-            declarative_util = DeclarativeUtils(raw_database, project_id, session_manager, schema, raw_db=raw_db)
-            declarative_utils[f"{raw_database}_{project_id}_{schema}"] = declarative_util
+            declarative_util = DeclarativeUtils(raw_database, tenant_id, session_manager, schema, raw_db=raw_db)
+            declarative_utils[f"{raw_database}_{tenant_id}_{schema}"] = declarative_util
             return declarative_util
 
 

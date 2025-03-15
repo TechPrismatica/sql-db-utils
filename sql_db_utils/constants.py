@@ -1,9 +1,7 @@
 from enum import StrEnum
 
-ENUMPARENT = (StrEnum,)
 
-
-class QueryType(*ENUMPARENT):
+class QueryType(StrEnum):
     """
     An enumeration representing the different types of queries that can be executed.
 
@@ -18,7 +16,7 @@ class QueryType(*ENUMPARENT):
     POLAR = "polars"
 
 
-class AGGridDateTrim(*ENUMPARENT):
+class AGGridDateTrim(StrEnum):
     """
     An enumeration representing the different date trimming options
 

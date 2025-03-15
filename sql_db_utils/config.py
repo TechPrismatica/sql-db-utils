@@ -42,11 +42,6 @@ class _PostgresConfig(BaseSettings):
         return value
 
 
-class _RedisConfig(BaseSettings):
-    REDIS_URI: str
-    REDIS_PROJECT_TAGS_DB: int = 18
-
-
 class _BasePathConf(BaseSettings):
     BASE_PATH: str = "/code/data"
 
@@ -64,7 +59,6 @@ class _PathConf(BaseSettings):
 
 ModuleConfig = _ModuleConfig()
 PostgresConfig = _PostgresConfig()
-RedisConfig = _RedisConfig()
 PathConfig = _PathConf()
 
-__all__ = ["ModuleConfig", "PostgresConfig", "RedisConfig", "PathConfig"]
+__all__ = ["ModuleConfig", "PostgresConfig", "PathConfig"]
