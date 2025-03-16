@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated, Callable, Union
+from typing import Annotated, Callable, List, Union
 
 from sqlalchemy import Engine, MetaData, NullPool, create_engine, text
 from sqlalchemy.exc import OperationalError
@@ -13,11 +13,17 @@ from sql_db_utils.sql_retry_handler import RetryingQuery
 
 
 class SQLSessionManager:
-    __slots__ = ("_db_engines", "database_uri")
+    __slots__ = ("_db_engines", "database_uri", "_postcreate_auto", "_postcreate_manual")
 
     def __init__(self, database_uri: Union[str, None] = None) -> None:
         self._db_engines = {}
         self.database_uri = database_uri or PostgresConfig.POSTGRES_URI
+        self._postcreate_auto: dict = {}
+        self._postcreate_manual: dict = {}
+
+    def __del__(self) -> None:
+        for engine in self._db_engines.values():
+            engine.dispose()
 
     def _get_fully_qualified_db(self, database: str, tenant_id: Union[str, None] = None) -> str:
         return f"{tenant_id}__{database}" if tenant_id else database
@@ -78,6 +84,7 @@ class SQLSessionManager:
             create_default_psql_dependencies(
                 metadata=metadata or DeclarativeBaseClassFactory(database).metadata, engine_obj=engine
             )
+            self.run_postcreate(engine, database, tenant_id)
         return engine
 
     def get_session(
@@ -96,6 +103,7 @@ class SQLSessionManager:
         return Session(
             bind=self._get_engine(database=database, tenant_id=tenant_id, metadata=metadata),
             future=True,
+            expire_on_commit=False,
         )
 
     def get_engine_obj(
@@ -106,7 +114,45 @@ class SQLSessionManager:
     def get_db_factory(self, database: str, retrying: bool = False) -> Callable:
         from fastapi import Cookie
 
-        async def get_db(tenant_id: Annotated[str, Cookie]):
+        def get_db(tenant_id: Annotated[str, Cookie]):
             yield self.get_session(database=database, tenant_id=tenant_id, retrying=retrying)
 
         return get_db
+
+    def postcreate_decorator(self, raw_db: str | List[str], postcreate_store: str) -> Callable:
+        postcreate_store = getattr(self, postcreate_store)
+
+        def decorator(func: Callable) -> None:
+            if isinstance(raw_db, list):
+                for db in raw_db:
+                    postcreate_auto = postcreate_store.get(db, [])
+                    postcreate_auto.append(func)
+                    postcreate_store[db] = postcreate_auto
+            else:
+                postcreate_auto = postcreate_store.get(raw_db, [])
+                postcreate_auto.append(func)
+                postcreate_store[raw_db] = postcreate_auto
+
+        return decorator
+
+    def register_postcreate(self, raw_db: str | List[str]) -> Callable:
+        return self.postcreate_decorator(raw_db, "_postcreate_auto")
+
+    def register_postcreate_manual(self, raw_db: str | List[str]) -> Callable:
+        return self.postcreate_decorator(raw_db, "_postcreate_manual")
+
+    def run_postcreate(self, engine: Engine, raw_db: str, tenant_id: Union[str, None] = None) -> None:
+        session = Session(bind=engine, future=True, expire_on_commit=False)
+        with session.begin():
+            for postcreate_func in self._postcreate_auto.get(raw_db, []):
+                result = postcreate_func(tenant_id)
+                if isinstance(result, list):
+                    for statement in result:
+                        session.execute(statement)
+                else:
+                    session.execute(result)
+        for postcreate_func in self._postcreate_manual.get(raw_db, []):
+            postcreate_func(session, tenant_id)
+        session.commit()
+        session.close()
+        logging.info(f"Postcreate for {raw_db} completed")
