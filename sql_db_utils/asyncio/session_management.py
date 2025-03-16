@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated, Any, AsyncGenerator, Union
+from typing import Annotated, Any, AsyncGenerator, Callable, List, Union
 
 from sqlalchemy import Engine, MetaData, NullPool, text
 from sqlalchemy.exc import OperationalError
@@ -13,11 +13,13 @@ from sql_db_utils.config import ModuleConfig, PostgresConfig
 
 
 class SQLSessionManager:
-    __slots__ = ("_db_engines", "database_uri")
+    __slots__ = ("_db_engines", "database_uri", "_postcreate_auto", "_postcreate_manual")
 
     def __init__(self, database_uri: Union[str, None] = None) -> None:
         self._db_engines = {}
         self.database_uri = database_uri or PostgresConfig.POSTGRES_URI
+        self._postcreate_auto: dict = {}
+        self._postcreate_manual: dict = {}
 
     def __del__(self) -> None:
         for engine in self._db_engines.values():
@@ -82,6 +84,7 @@ class SQLSessionManager:
             await create_default_psql_dependencies(
                 metadata=metadata or DeclarativeBaseClassFactory(database).metadata, engine_obj=engine
             )
+            await self.run_postcreate(engine, database, tenant_id)
         return engine
 
     async def get_session(
@@ -115,3 +118,41 @@ class SQLSessionManager:
             yield await self.get_session(database=database, tenant_id=tenant_id, retrying=retrying)
 
         return get_db
+
+    def postcreate_decorator(self, raw_db: str | List[str], postcreate_store: str) -> Callable:
+        postcreate_store = getattr(self, postcreate_store)
+
+        def decorator(func: Callable) -> None:
+            if isinstance(raw_db, list):
+                for db in raw_db:
+                    postcreate_auto = postcreate_store.get(db, [])
+                    postcreate_auto.append(func)
+                    postcreate_store[db] = postcreate_auto
+            else:
+                postcreate_auto = postcreate_store.get(raw_db, [])
+                postcreate_auto.append(func)
+                postcreate_store[raw_db] = postcreate_auto
+
+        return decorator
+
+    def register_postcreate(self, raw_db: str | List[str]) -> Callable:
+        return self.postcreate_decorator(raw_db, "_postcreate_auto")
+
+    def register_postcreate_manual(self, raw_db: str | List[str]) -> Callable:
+        return self.postcreate_decorator(raw_db, "_postcreate_manual")
+
+    async def run_postcreate(self, engine: AsyncEngine, raw_db: str, tenant_id: Union[str, None] = None) -> None:
+        session = AsyncSession(bind=engine, future=True, expire_on_commit=False)
+        async with session.begin():
+            for postcreate_func in self._postcreate_auto.get(raw_db, []):
+                result = postcreate_func(tenant_id)
+                if isinstance(result, list):
+                    for statement in result:
+                        await session.execute(statement)
+                else:
+                    await session.execute(result)
+        for postcreate_func in self._postcreate_manual.get(raw_db, []):
+            await postcreate_func(session, tenant_id)
+        await session.commit()
+        await session.close()
+        logging.info(f"Postcreate for {raw_db} completed")
