@@ -127,7 +127,7 @@ def compile_create_prefixed_id_function(element: CreatePrefixedIdFunction, _comp
           next_val INTEGER;
         BEGIN
           next_val := nextval(seq_name);
-          RETURN prefix || next_val;
+          RETURN prefix || '_' || next_val;
         END;
         $$ LANGUAGE plpgsql;
     """
@@ -148,7 +148,17 @@ def compile_create_suffixed_id_function(element: CreateSuffixedIdFunction, _comp
           next_val INTEGER;
         BEGIN
           next_val := nextval(seq_name);
-          RETURN next_val || suffix;
+          RETURN next_val || '_' || suffix;
         END;
         $$ LANGUAGE plpgsql;
     """
+
+
+class CreateSchema(DDLElement):
+    def __init__(self, schema_name: str):
+        self.schema_name = schema_name
+
+
+@compiler.compiles(CreateSchema)
+def compile_create_schema(element: CreateSchema, compiler: Any, **kw: Any) -> str:
+    return f"CREATE SCHEMA IF NOT EXISTS {element.schema_name};"
