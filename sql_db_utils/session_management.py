@@ -13,7 +13,14 @@ from sql_db_utils.sql_retry_handler import RetryingQuery
 
 
 class SQLSessionManager:
-    __slots__ = ("_db_engines", "database_uri", "_postcreate_auto", "_postcreate_manual", "_precreate_auto", "_precreate_manual")
+    __slots__ = (
+        "_db_engines",
+        "database_uri",
+        "_postcreate_auto",
+        "_postcreate_manual",
+        "_precreate_auto",
+        "_precreate_manual",
+    )
 
     def __init__(self, database_uri: Union[str, None] = None) -> None:
         self._db_engines = {}
