@@ -13,13 +13,22 @@ from sql_db_utils.sql_retry_handler import RetryingQuery
 
 
 class SQLSessionManager:
-    __slots__ = ("_db_engines", "database_uri", "_postcreate_auto", "_postcreate_manual")
+    __slots__ = (
+        "_db_engines",
+        "database_uri",
+        "_postcreate_auto",
+        "_postcreate_manual",
+        "_precreate_auto",
+        "_precreate_manual",
+    )
 
     def __init__(self, database_uri: Union[str, None] = None) -> None:
         self._db_engines = {}
         self.database_uri = database_uri or PostgresConfig.POSTGRES_URI
         self._postcreate_auto: dict = {}
         self._postcreate_manual: dict = {}
+        self._precreate_auto: dict = {}
+        self._precreate_manual: dict = {}
 
     def __del__(self) -> None:
         for engine in self._db_engines.values():
@@ -81,6 +90,7 @@ class SQLSessionManager:
             self._ensure_engine_connection(engine)
             if not PostgresConfig.PG_ANTI_PERSISTENT:
                 self._db_engines[qualified_db_name] = engine
+            self.run_precreate(engine, database, tenant_id)
             create_default_psql_dependencies(
                 metadata=metadata or DeclarativeBaseClassFactory(database).metadata, engine_obj=engine
             )
@@ -135,11 +145,49 @@ class SQLSessionManager:
 
         return decorator
 
+    def precreate_decorator(self, raw_db: str | List[str], precreate_store: str) -> Callable:
+        precreate_store = getattr(self, precreate_store)
+
+        def decorator(func: Callable) -> None:
+            if isinstance(raw_db, list):
+                for db in raw_db:
+                    precreate_auto = precreate_store.get(db, [])
+                    precreate_auto.append(func)
+                    precreate_store[db] = precreate_auto
+            else:
+                precreate_auto = precreate_store.get(raw_db, [])
+                precreate_auto.append(func)
+                precreate_store[raw_db] = precreate_auto
+
+        return decorator
+
     def register_postcreate(self, raw_db: str | List[str]) -> Callable:
         return self.postcreate_decorator(raw_db, "_postcreate_auto")
 
     def register_postcreate_manual(self, raw_db: str | List[str]) -> Callable:
         return self.postcreate_decorator(raw_db, "_postcreate_manual")
+
+    def register_precreate(self, raw_db: str | List[str]) -> Callable:
+        return self.precreate_decorator(raw_db, "_precreate_auto")
+
+    def register_precreate_manual(self, raw_db: str | List[str]) -> Callable:
+        return self.precreate_decorator(raw_db, "_precreate_manual")
+
+    def run_precreate(self, engine: Engine, raw_db: str, tenant_id: Union[str, None] = None) -> None:
+        session = Session(bind=engine, future=True, expire_on_commit=False)
+        with session.begin():
+            for precreate_func in self._precreate_auto.get(raw_db, []):
+                result = precreate_func(tenant_id)
+                if isinstance(result, list):
+                    for statement in result:
+                        session.execute(statement)
+                else:
+                    session.execute(result)
+        for precreate_func in self._precreate_manual.get(raw_db, []):
+            precreate_func(session, tenant_id)
+        session.commit()
+        session.close()
+        logging.info(f"Precreate for {raw_db} completed")
 
     def run_postcreate(self, engine: Engine, raw_db: str, tenant_id: Union[str, None] = None) -> None:
         session = Session(bind=engine, future=True, expire_on_commit=False)
