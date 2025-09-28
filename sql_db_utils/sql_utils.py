@@ -52,7 +52,11 @@ class SqlAlchemyUtil(Generic[TableType]):
         table = table if table is not None else self.table
         return_keys = return_keys or []
         try:
-            insert_stmt = insert(table).values(data).returning(*(getattr(table.c, key) for key in return_keys))
+            insert_stmt = (
+                insert(table)
+                .values(data)
+                .returning(*(getattr(table.c if isinstance(table, Table) else table, key) for key in return_keys))
+            )
             return_values = self.session.execute(insert_stmt)
             self.session.commit()
             if return_keys:
@@ -83,7 +87,7 @@ class SqlAlchemyUtil(Generic[TableType]):
                 update(table)
                 .values(data)
                 .where(*where_conditions)
-                .returning(*(getattr(table.c, key) for key in return_keys))
+                .returning(*(getattr(table.c if isinstance(table, Table) else table, key) for key in return_keys))
             )
             return_values = self.session.execute(update_stmt)
             self.session.commit()
@@ -105,7 +109,10 @@ class SqlAlchemyUtil(Generic[TableType]):
         return_keys = return_keys or []
         try:
             return_values = self.session.execute(
-                update(table).returning(*(getattr(table.c, key) for key in return_keys)), data
+                update(table).returning(
+                    *(getattr(table.c if isinstance(table, Table) else table, key) for key in return_keys)
+                ),
+                data,
             )
             self.session.commit()
             if return_keys:
@@ -114,24 +121,34 @@ class SqlAlchemyUtil(Generic[TableType]):
             logger.error(f"Error occurred while updating: {e}", exc_info=True)
             raise e
 
-    def upsert(self, insert_json: dict, primary_keys: List[str] = None, table: TableType = None):
+    def upsert(
+        self, insert_json: dict, primary_keys: List[str] = None, return_keys: List[str] = None, table: TableType = None
+    ):
         """
         Inserts or updates a row in the database.
 
         Args:
             insert_json (dict): A dictionary containing the data to be inserted or updated.
             primary_keys (List[str], optional): A list of primary key column names. Defaults to None.
+            return_keys (List[str], optional): A list of column names to return after the upsert. Defaults to None.
             table (TableType, optional): The SQLAlchemy declarative base object. Defaults to None.
+
+        Returns:
+            A list of dictionaries containing the upserted data if return_keys is provided.
         """
         table = table if table is not None else self.table
+        return_keys = return_keys or []
         try:
             insert_statement = (
                 postgres_insert(table)
                 .values(**insert_json)
                 .on_conflict_do_update(index_elements=primary_keys, set_=insert_json)
+                .returning(*(getattr(table.c if isinstance(table, Table) else table, key) for key in return_keys))
             )
-            self.session.execute(insert_statement)
+            return_values = self.session.execute(insert_statement)
             self.session.commit()
+            if return_keys:
+                return jsonable_encoder(return_values.mappings().all())
         except Exception as e:
             logger.error(f"Error while upserting the record {e}", exc_info=True)
             raise e
