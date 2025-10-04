@@ -124,7 +124,7 @@ class SQLSessionManager:
     def get_db_factory(self, database: str, retrying: bool = False) -> Callable:
         from fastapi import Cookie
 
-        def get_db(tenant_id: Annotated[str, Cookie]):
+        def get_db(tenant_id: Annotated[str, Cookie()] = None) -> Session:
             yield self.get_session(database=database, tenant_id=tenant_id, retrying=retrying)
 
         return get_db
