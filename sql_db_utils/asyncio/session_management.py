@@ -124,6 +124,20 @@ class SQLSessionManager:
     def get_db_factory(
         self, database: str, retrying: bool = False, raw_db: bool = False
     ) -> AsyncGenerator[AsyncSession, Any]:
+        """
+        Create a database session factory for FastAPI dependency injection.
+
+        Args:
+            database: Name of the database.
+            retrying: Whether to enable retry logic for queries.
+            raw_db: If True, bypasses tenant_id and creates a system-level session without tenant isolation.
+                Use with caution for admin operations, migrations, or other system-level tasks.
+                WARNING: Bypassing tenant isolation may expose all data in the database to the session.
+                Only use raw_db=True for trusted, internal operations.
+
+        Returns:
+            An async factory function that yields database sessions.
+        """
         from fastapi import Cookie
 
         async def get_db(tenant_id: Annotated[Union[str, None], Cookie()] = None) -> AsyncGenerator[AsyncSession, Any]:
