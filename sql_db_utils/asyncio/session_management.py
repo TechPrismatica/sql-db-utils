@@ -121,11 +121,13 @@ class SQLSessionManager:
     ) -> AsyncEngine:
         return await self._get_engine(database=database, tenant_id=tenant_id, metadata=metadata)
 
-    def get_db_factory(self, database: str, retrying: bool = False) -> AsyncGenerator[AsyncSession, Any]:
+    def get_db_factory(
+        self, database: str, retrying: bool = False, raw_db: bool = False
+    ) -> AsyncGenerator[AsyncSession, Any]:
         from fastapi import Cookie
 
         async def get_db(tenant_id: Annotated[Union[str, None], Cookie()] = None) -> AsyncGenerator[AsyncSession, Any]:
-            yield await self.get_session(database=database, tenant_id=tenant_id, retrying=retrying)
+            yield await self.get_session(database=database, tenant_id=None if raw_db else tenant_id, retrying=retrying)
 
         return get_db
 

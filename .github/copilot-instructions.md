@@ -43,15 +43,15 @@ Always reference these instructions first and fallback to search or bash command
    python -c "
    from sql_db_utils import SQLSessionManager
    manager = SQLSessionManager()
-   
+
    @manager.register_precreate('test_db')
    def test_precreate(tenant_id):
        return 'SELECT 1;'
-   
+
    @manager.register_postcreate('test_db')
    def test_postcreate(tenant_id):
        return 'SELECT 2;'
-   
+
    print('Precreate/Postcreate registration successful')
    "
    ```
@@ -117,7 +117,7 @@ sql-db-utils/
 ### Development Dependencies:
 - **Testing**: pytest, pytest-cov, coverage
 - **Linting**: ruff (replaces black, flake8, isort)
-- **Git hooks**: pre-commit 
+- **Git hooks**: pre-commit
 - **Type checking**: Built into package development
 - **Core Dependencies**: SQLAlchemy, sqlalchemy-utils, psycopg, python-dateutil, whenever
 

@@ -121,11 +121,11 @@ class SQLSessionManager:
     ) -> Engine:
         return self._get_engine(database=database, tenant_id=tenant_id, metadata=metadata)
 
-    def get_db_factory(self, database: str, retrying: bool = False) -> Callable:
+    def get_db_factory(self, database: str, retrying: bool = False, raw_db: bool = False) -> Callable:
         from fastapi import Cookie
 
         def get_db(tenant_id: Annotated[str, Cookie()] = None) -> Session:
-            yield self.get_session(database=database, tenant_id=tenant_id, retrying=retrying)
+            yield self.get_session(database=database, tenant_id=None if raw_db else tenant_id, retrying=retrying)
 
         return get_db
 
