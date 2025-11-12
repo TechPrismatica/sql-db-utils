@@ -122,6 +122,19 @@ class SQLSessionManager:
         return self._get_engine(database=database, tenant_id=tenant_id, metadata=metadata)
 
     def get_db_factory(self, database: str, retrying: bool = False, raw_db: bool = False) -> Callable:
+        """
+        Create a database session factory for FastAPI dependency injection.
+
+        Args:
+            database (str): Name of the database.
+            retrying (bool): Whether to enable retry logic for queries.
+            raw_db (bool): If True, bypasses tenant_id and creates a system-level session without tenant isolation.
+                Use with caution for admin operations, migrations, or other system-level tasks.
+                WARNING: Bypassing tenant isolation may expose all data and should only be used by trusted code.
+
+        Returns:
+            Callable: A factory function that yields database sessions.
+        """
         from fastapi import Cookie
 
         def get_db(tenant_id: Annotated[str, Cookie()] = None) -> Session:
